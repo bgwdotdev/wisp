@@ -7,6 +7,7 @@ import gleam/dict.{type Dict}
 import gleam/dynamic.{type Dynamic}
 import gleam/erlang
 import gleam/erlang/atom.{type Atom}
+import gleam/erlang/process
 import gleam/http.{type Method}
 import gleam/http/cookie
 import gleam/http/request.{type Request as HttpRequest}
@@ -52,7 +53,12 @@ pub fn mist_handler(
   secret_key_base: String,
 ) -> fn(HttpRequest(mist.Connection)) -> HttpResponse(mist.ResponseData) {
   fn(request: HttpRequest(_)) {
-    let connection = make_connection(mist_body_reader(request), secret_key_base)
+    let connection =
+      make_connection(
+        mist_body_reader(request),
+        secret_key_base,
+        option.Some(request),
+      )
     let request = request.set_body(request, connection)
 
     use <- exception.defer(fn() {
@@ -95,6 +101,7 @@ fn mist_response(response: Response) -> HttpResponse(mist.ResponseData) {
     Text(text) -> mist.Bytes(bytes_builder.from_string_builder(text))
     Bytes(bytes) -> mist.Bytes(bytes)
     File(path) -> mist_send_file(path)
+    Websocket(x) -> mist.Websocket(x)
   }
   response
   |> response.set_body(body)
@@ -145,6 +152,8 @@ pub type Body {
   /// in place of any with an empty body.
   ///
   Empty
+
+  Websocket(process.Selector(process.ProcessDown))
 }
 
 /// An alias for a HTTP response containing a `Body`.
@@ -605,10 +614,15 @@ pub opaque type Connection {
     read_chunk_size: Int,
     secret_key_base: String,
     temporary_directory: String,
+    mist_conn: Option(HttpRequest(mist.Connection)),
   )
 }
 
-fn make_connection(body_reader: Reader, secret_key_base: String) -> Connection {
+fn make_connection(
+  body_reader: Reader,
+  secret_key_base: String,
+  mist: Option(HttpRequest(mist.Connection)),
+) -> Connection {
   // TODO: replace `/tmp` with appropriate for the OS
   let prefix = "/tmp/gleam-wisp/"
   let temporary_directory = join_path(prefix, random_slug())
@@ -619,6 +633,7 @@ fn make_connection(body_reader: Reader, secret_key_base: String) -> Connection {
     read_chunk_size: 1_000_000,
     temporary_directory: temporary_directory,
     secret_key_base: secret_key_base,
+    mist_conn: mist,
   )
 }
 
@@ -1832,5 +1847,23 @@ pub fn create_canned_connection(
   make_connection(
     fn(_size) { Ok(Chunk(body, fn(_size) { Ok(ReadingFinished) })) },
     secret_key_base,
+    option.None,
   )
+}
+
+pub fn websocket(
+  req: Request,
+  on_init on_init,
+  on_close on_close,
+  handler handler,
+) -> Response {
+  let assert option.Some(x) = req.body.mist_conn
+  let r = mist.websocket(x, handler, on_init, on_close)
+  case r.status, r.body {
+    200, mist.Websocket(x) ->
+      ok()
+      |> set_body(Websocket(x))
+    400, _ -> bad_request()
+    _, _ -> internal_server_error()
+  }
 }
