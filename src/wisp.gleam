@@ -18,6 +18,7 @@ import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{type Option}
+import gleam/otp/actor
 import gleam/result
 import gleam/string
 import gleam/string_builder.{type StringBuilder}
@@ -57,7 +58,7 @@ pub fn mist_handler(
       make_connection(
         mist_body_reader(request),
         secret_key_base,
-        option.Some(request),
+        option.Some(request.body),
       )
     let request = request.set_body(request, connection)
 
@@ -614,14 +615,14 @@ pub opaque type Connection {
     read_chunk_size: Int,
     secret_key_base: String,
     temporary_directory: String,
-    mist_conn: Option(HttpRequest(mist.Connection)),
+    mist_conn: Option(mist.Connection),
   )
 }
 
 fn make_connection(
   body_reader: Reader,
   secret_key_base: String,
-  mist: Option(HttpRequest(mist.Connection)),
+  mist: Option(mist.Connection),
 ) -> Connection {
   // TODO: replace `/tmp` with appropriate for the OS
   let prefix = "/tmp/gleam-wisp/"
@@ -1853,13 +1854,17 @@ pub fn create_canned_connection(
 
 pub fn websocket(
   req: Request,
-  on_init on_init,
-  on_close on_close,
-  handler handler,
+  handler handler: fn(a, mist.WebsocketConnection, mist.WebsocketMessage(b)) ->
+    actor.Next(b, a),
+  on_init on_init: fn(mist.WebsocketConnection) ->
+    #(a, Option(process.Selector(b))),
+  on_close on_close: fn(a) -> Nil,
 ) -> Response {
-  let assert option.Some(x) = req.body.mist_conn
-  let r = mist.websocket(x, handler, on_init, on_close)
-  case r.status, r.body {
+  let assert option.Some(x) =
+    req.body.mist_conn
+    |> option.map(request.set_body(req, _))
+  let resp = mist.websocket(x, handler, on_init, on_close)
+  case resp.status, resp.body {
     200, mist.Websocket(x) ->
       ok()
       |> set_body(Websocket(x))
