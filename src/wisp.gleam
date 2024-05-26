@@ -58,7 +58,7 @@ pub fn mist_handler(
       make_connection(
         mist_body_reader(request),
         secret_key_base,
-        option.Some(request.body),
+        Socket(request.body),
       )
     let request = request.set_body(request, connection)
 
@@ -153,7 +153,7 @@ pub type Body {
   /// in place of any with an empty body.
   ///
   Empty
-
+  /// An newly established websocket connection.
   Websocket(process.Selector(process.ProcessDown))
 }
 
@@ -615,14 +615,14 @@ pub opaque type Connection {
     read_chunk_size: Int,
     secret_key_base: String,
     temporary_directory: String,
-    mist_conn: Option(mist.Connection),
+    socket: Socket,
   )
 }
 
 fn make_connection(
   body_reader: Reader,
   secret_key_base: String,
-  mist: Option(mist.Connection),
+  socket: Socket,
 ) -> Connection {
   // TODO: replace `/tmp` with appropriate for the OS
   let prefix = "/tmp/gleam-wisp/"
@@ -634,7 +634,7 @@ fn make_connection(
     read_chunk_size: 1_000_000,
     temporary_directory: temporary_directory,
     secret_key_base: secret_key_base,
-    mist_conn: mist,
+    socket: socket,
   )
 }
 
@@ -1848,11 +1848,88 @@ pub fn create_canned_connection(
   make_connection(
     fn(_size) { Ok(Chunk(body, fn(_size) { Ok(ReadingFinished) })) },
     secret_key_base,
-    option.None,
+    NoSocket,
   )
 }
 
+//
+// Websockets
+//
+
+// TODO(bgw): doc more once fleshed out
+
+/// The messages possible to receive to and from a websocket.
+pub type WebsocketMessage(a) {
+  WSText(String)
+  WSBinary(BitArray)
+  WSClosed
+  WSShutdown
+  WSCustom(a)
+}
+
+fn from_mist_websocket_message(
+  msg: mist.WebsocketMessage(a),
+) -> WebsocketMessage(a) {
+  case msg {
+    mist.Text(x) -> WSText(x)
+    mist.Binary(x) -> WSBinary(x)
+    mist.Closed -> WSClosed
+    mist.Shutdown -> WSShutdown
+    mist.Custom(x) -> WSCustom(x)
+  }
+}
+
+pub opaque type WebsocketConnection {
+  WebsocketConnection(mist.WebsocketConnection)
+}
+
+/// Sends text to a websocket connection
+pub fn send_text(connection: WebsocketConnection, text: String) {
+  let conn = case connection {
+    WebsocketConnection(conn) -> conn
+  }
+  mist.send_text_frame(conn, text)
+}
+
+/// Sends binary data to a websocket connection
+pub fn send_binary(connection: WebsocketConnection, binary: BitArray) {
+  let conn = case connection {
+    WebsocketConnection(conn) -> conn
+  }
+  mist.send_binary_frame(conn, binary)
+}
+
+pub opaque type Socket {
+  Socket(mist.Connection)
+  // TODO: can delete if we handle create_canned_connection somehow?
+  NoSocket
+}
+
+// TODO: heavily doc this
 pub fn websocket(
+  req: Request,
+  handler handler: fn(a, WebsocketConnection, WebsocketMessage(b)) ->
+    actor.Next(b, a),
+  on_init on_init: fn(WebsocketConnection) -> #(a, Option(process.Selector(b))),
+  on_close on_close: fn(a) -> Nil,
+) -> Response {
+  let handler = fn(
+    state: a,
+    conn: mist.WebsocketConnection,
+    msg: mist.WebsocketMessage(b),
+  ) {
+    let msg = msg |> from_mist_websocket_message
+    let conn = WebsocketConnection(conn)
+    handler(state, conn, msg)
+  }
+  let on_init = fn(conn: mist.WebsocketConnection) {
+    let conn = WebsocketConnection(conn)
+    on_init(conn)
+  }
+  mist_websocket(req, handler, on_init, on_close)
+}
+
+fn mist_websocket(
   req: Request,
   handler handler: fn(a, mist.WebsocketConnection, mist.WebsocketMessage(b)) ->
     actor.Next(b, a),
@@ -1860,10 +1937,9 @@ pub fn websocket(
     #(a, Option(process.Selector(b))),
   on_close on_close: fn(a) -> Nil,
 ) -> Response {
-  let assert option.Some(x) =
-    req.body.mist_conn
-    |> option.map(request.set_body(req, _))
-  let resp = mist.websocket(x, handler, on_init, on_close)
+  let assert Socket(x) = req.body.socket
+  let req = request.set_body(req, x)
+  let resp = mist.websocket(req, handler, on_init(_), on_close)
   case resp.status, resp.body {
     200, mist.Websocket(x) ->
       ok()
