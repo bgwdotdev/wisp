@@ -17,7 +17,7 @@ pub fn webserver() {
   let secret_key_base = wisp.random_string(64)
   let assert Ok(_) =
     wisp_mist.handler(
-      fn(req, ws) { handle_req(req, fn() { Context(ws) }) },
+      fn(req, ws, socket) { handle_req(req, fn() { Context(ws, socket) }) },
       secret_key_base,
     )
     |> mist.new
@@ -28,7 +28,7 @@ pub fn webserver() {
 }
 
 type Context {
-  Context(ws: wisp.WsSupported)
+  Context(ws: wisp.WsSupported, socket: wisp_mist.Ws)
 }
 
 fn handle_req(req: wisp.Request, ctx: fn() -> Context) -> wisp.Response {
@@ -38,12 +38,12 @@ fn handle_req(req: wisp.Request, ctx: fn() -> Context) -> wisp.Response {
       wisp.ok()
       |> wisp.html_body(string_builder.from_string("<h1>Hello, Joe!</h1>"))
 
-    ["test", "ws"] -> ws_handler(req, ctx.ws)
+    ["test", "ws"] -> ws_handler(req, ctx)
     _ -> wisp.not_found()
   }
 }
 
-fn ws_handler(req: wisp.Request, ws: wisp.WsSupported) {
+fn ws_handler(req: wisp.Request, ctx: Context) {
   let on_init = fn(conn: wisp.WebsocketConnection) {
     let assert Ok(_sent) = wisp_mist.send_text(conn, "Hello, Joe!")
     #("", None)
@@ -57,5 +57,6 @@ fn ws_handler(req: wisp.Request, ws: wisp.WsSupported) {
     }
   }
   let on_close = fn(_state) { Nil }
-  wisp.ws_handler(req, ws, handler, on_init, on_close) |> wisp_mist.websocket()
+  wisp.ws_handler(req, ctx.ws, handler, on_init, on_close)
+  |> wisp_mist.websocket(ctx.socket)
 }

@@ -549,14 +549,12 @@ pub opaque type Connection {
     read_chunk_size: Int,
     secret_key_base: String,
     temporary_directory: String,
-    socket: internal.Socket,
   )
 }
 
 pub fn make_connection(
   body_reader: Reader,
   secret_key_base: String,
-  socket: internal.Socket,
 ) -> Connection {
   // TODO: replace `/tmp` with appropriate for the OS
   let prefix = "/tmp/gleam-wisp/"
@@ -568,7 +566,6 @@ pub fn make_connection(
     read_chunk_size: 1_000_000,
     temporary_directory: temporary_directory,
     secret_key_base: secret_key_base,
-    socket: socket,
   )
 }
 
@@ -1782,7 +1779,6 @@ pub fn create_canned_connection(
   make_connection(
     fn(_size) { Ok(Chunk(body, fn(_size) { Ok(ReadingFinished) })) },
     secret_key_base,
-    internal.NoSocket,
   )
 }
 
@@ -1813,7 +1809,6 @@ pub type WsSupported =
 pub type WebsocketHandler(a, b) {
   WebsocketHandler(
     ws: WsSupported,
-    socket: internal.Socket,
     req: Request,
     handler: fn(a, WebsocketConnection, WebsocketMessage(b)) -> actor.Next(b, a),
     on_init: fn(WebsocketConnection) -> #(a, Option(process.Selector(b))),
@@ -1830,7 +1825,6 @@ pub fn ws_handler(
 ) -> WebsocketHandler(a, b) {
   WebsocketHandler(
     ws: ws,
-    socket: req.body.socket,
     req: req,
     handler: handler,
     on_init: on_init,

@@ -16,16 +16,13 @@ import wisp/internal
 // HTTP 
 
 pub fn handler(
-  handler: fn(wisp.Request, wisp.WsSupported) -> wisp.Response,
+  handler: fn(wisp.Request, wisp.WsSupported, Ws) -> wisp.Response,
   secret_key_base: String,
 ) -> fn(HttpRequest(mist.Connection)) -> HttpResponse(mist.ResponseData) {
   fn(request: HttpRequest(_)) {
+    let mist: mist.Connection = request.body
     let connection =
-      wisp.make_connection(
-        mist_body_reader(request),
-        secret_key_base,
-        internal.Socket(request.body),
-      )
+      wisp.make_connection(mist_body_reader(request), secret_key_base)
     let request = request.set_body(request, connection)
 
     use <- exception.defer(fn() {
@@ -34,7 +31,7 @@ pub fn handler(
 
     let response =
       request
-      |> handler(internal.WsSupported)
+      |> handler(internal.WsSupported, Ws(mist))
       |> mist_response
 
     response
@@ -87,10 +84,14 @@ fn mist_send_file(path: String) -> mist.ResponseData {
 
 // WEBSOCKETS
 
-pub fn websocket(ws: wisp.WebsocketHandler(a, b)) -> wisp.Response {
+pub opaque type Ws {
+  Ws(mist.Connection)
+}
+
+pub fn websocket(ws: wisp.WebsocketHandler(a, b), socket: Ws) -> wisp.Response {
   let handler = mist_ws_handler(ws)
   let on_init = mist_ws_on_init(ws)
-  mist_websocket(ws.req, ws.socket, handler, on_init, ws.on_close)
+  mist_websocket(ws.req, socket, handler, on_init, ws.on_close)
 }
 
 fn mist_ws_handler(
@@ -115,14 +116,14 @@ fn mist_ws_on_init(
 
 fn mist_websocket(
   req: wisp.Request,
-  socket: internal.Socket,
+  socket: Ws,
   handler handler: fn(a, mist.WebsocketConnection, mist.WebsocketMessage(b)) ->
     actor.Next(b, a),
   on_init on_init: fn(mist.WebsocketConnection) ->
     #(a, Option(process.Selector(b))),
   on_close on_close: fn(a) -> Nil,
 ) -> wisp.Response {
-  let assert internal.Socket(x) = socket
+  let assert Ws(x) = socket
   let req = request.set_body(req, x)
   let resp = mist.websocket(req, handler, on_init(_), on_close)
   case resp.status, resp.body {
