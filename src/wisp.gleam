@@ -25,8 +25,8 @@ import gleam/string_builder.{type StringBuilder}
 import gleam/uri
 import logging
 import marceau
-import mist
 import simplifile
+import wisp/internal
 
 //
 // Running the server
@@ -49,74 +49,8 @@ import simplifile
 ///   process.sleep_forever()
 /// }
 /// ```
-pub fn mist_handler(
-  handler: fn(Request) -> Response,
-  secret_key_base: String,
-) -> fn(HttpRequest(mist.Connection)) -> HttpResponse(mist.ResponseData) {
-  fn(request: HttpRequest(_)) {
-    let connection =
-      make_connection(
-        mist_body_reader(request),
-        secret_key_base,
-        Socket(request.body),
-      )
-    let request = request.set_body(request, connection)
-
-    use <- exception.defer(fn() {
-      let assert Ok(_) = delete_temporary_files(request)
-    })
-
-    let response =
-      request
-      |> handler
-      |> mist_response
-
-    response
-  }
-}
-
-fn mist_body_reader(request: HttpRequest(mist.Connection)) -> Reader {
-  case mist.stream(request) {
-    Error(_) -> fn(_) { Ok(ReadingFinished) }
-    Ok(stream) -> fn(size) { wrap_mist_chunk(stream(size)) }
-  }
-}
-
-fn wrap_mist_chunk(
-  chunk: Result(mist.Chunk, mist.ReadError),
-) -> Result(Read, Nil) {
-  chunk
-  |> result.nil_error
-  |> result.map(fn(chunk) {
-    case chunk {
-      mist.Done -> ReadingFinished
-      mist.Chunk(data, consume) ->
-        Chunk(data, fn(size) { wrap_mist_chunk(consume(size)) })
-    }
-  })
-}
-
-fn mist_response(response: Response) -> HttpResponse(mist.ResponseData) {
-  let body = case response.body {
-    Empty -> mist.Bytes(bytes_builder.new())
-    Text(text) -> mist.Bytes(bytes_builder.from_string_builder(text))
-    Bytes(bytes) -> mist.Bytes(bytes)
-    File(path) -> mist_send_file(path)
-    Websocket(x) -> mist.Websocket(x)
-  }
-  response
-  |> response.set_body(body)
-}
-
-fn mist_send_file(path: String) -> mist.ResponseData {
-  case mist.send_file(path, offset: 0, limit: option.None) {
-    Ok(body) -> body
-    Error(error) -> {
-      log_error(string.inspect(error))
-      // TODO: return 500
-      mist.Bytes(bytes_builder.new())
-    }
-  }
+pub fn mist_handler() {
+  todo as "document move"
 }
 
 //
@@ -615,14 +549,14 @@ pub opaque type Connection {
     read_chunk_size: Int,
     secret_key_base: String,
     temporary_directory: String,
-    socket: Socket,
+    socket: internal.Socket,
   )
 }
 
-fn make_connection(
+pub fn make_connection(
   body_reader: Reader,
   secret_key_base: String,
-  socket: Socket,
+  socket: internal.Socket,
 ) -> Connection {
   // TODO: replace `/tmp` with appropriate for the OS
   let prefix = "/tmp/gleam-wisp/"
@@ -671,7 +605,7 @@ fn buffered_read(reader: BufferedReader, chunk_size: Int) -> Result(Read, Nil) {
 type Reader =
   fn(Int) -> Result(Read, Nil)
 
-type Read {
+pub type Read {
   Chunk(BitArray, next: Reader)
   ReadingFinished
 }
@@ -1848,7 +1782,7 @@ pub fn create_canned_connection(
   make_connection(
     fn(_size) { Ok(Chunk(body, fn(_size) { Ok(ReadingFinished) })) },
     secret_key_base,
-    NoSocket,
+    internal.NoSocket,
   )
 }
 
@@ -1860,91 +1794,46 @@ pub fn create_canned_connection(
 
 /// The messages possible to receive to and from a websocket.
 pub type WebsocketMessage(a) {
-  WSText(String)
-  WSBinary(BitArray)
-  WSClosed
-  WSShutdown
-  WSCustom(a)
+  WsText(String)
+  WsBinary(BitArray)
+  WsClosed
+  WsShutdown
+  WsCustom(a)
 }
 
-fn from_mist_websocket_message(
-  msg: mist.WebsocketMessage(a),
-) -> WebsocketMessage(a) {
-  case msg {
-    mist.Text(x) -> WSText(x)
-    mist.Binary(x) -> WSBinary(x)
-    mist.Closed -> WSClosed
-    mist.Shutdown -> WSShutdown
-    mist.Custom(x) -> WSCustom(x)
-  }
-}
+// sends to user
+// could this be a subject that we Selector in the adapter?
+type WebsocketConnection =
+  internal.WebsocketConnection
 
-pub opaque type WebsocketConnection {
-  WebsocketConnection(mist.WebsocketConnection)
-}
-
-/// Sends text to a websocket connection
-pub fn send_text(connection: WebsocketConnection, text: String) {
-  let conn = case connection {
-    WebsocketConnection(conn) -> conn
-  }
-  mist.send_text_frame(conn, text)
-}
-
-/// Sends binary data to a websocket connection
-pub fn send_binary(connection: WebsocketConnection, binary: BitArray) {
-  let conn = case connection {
-    WebsocketConnection(conn) -> conn
-  }
-  mist.send_binary_frame(conn, binary)
-}
-
-pub opaque type Socket {
-  Socket(mist.Connection)
-  // TODO: can delete if we handle create_canned_connection somehow?
-  NoSocket
-}
+pub type WsSupported =
+  internal.WsSupported
 
 // TODO: heavily doc this
-pub fn websocket(
-  req: Request,
-  handler handler: fn(a, WebsocketConnection, WebsocketMessage(b)) ->
-    actor.Next(b, a),
-  on_init on_init: fn(WebsocketConnection) -> #(a, Option(process.Selector(b))),
-  on_close on_close: fn(a) -> Nil,
-) -> Response {
-  let handler = fn(
-    state: a,
-    conn: mist.WebsocketConnection,
-    msg: mist.WebsocketMessage(b),
-  ) {
-    let msg = msg |> from_mist_websocket_message
-    let conn = WebsocketConnection(conn)
-    handler(state, conn, msg)
-  }
-  let on_init = fn(conn: mist.WebsocketConnection) {
-    let conn = WebsocketConnection(conn)
-    on_init(conn)
-  }
-  mist_websocket(req, handler, on_init, on_close)
+pub type WebsocketHandler(a, b) {
+  WebsocketHandler(
+    ws: WsSupported,
+    socket: internal.Socket,
+    req: Request,
+    handler: fn(a, WebsocketConnection, WebsocketMessage(b)) -> actor.Next(b, a),
+    on_init: fn(WebsocketConnection) -> #(a, Option(process.Selector(b))),
+    on_close: fn(a) -> Nil,
+  )
 }
 
-fn mist_websocket(
+pub fn ws_handler(
   req: Request,
-  handler handler: fn(a, mist.WebsocketConnection, mist.WebsocketMessage(b)) ->
-    actor.Next(b, a),
-  on_init on_init: fn(mist.WebsocketConnection) ->
-    #(a, Option(process.Selector(b))),
-  on_close on_close: fn(a) -> Nil,
-) -> Response {
-  let assert Socket(x) = req.body.socket
-  let req = request.set_body(req, x)
-  let resp = mist.websocket(req, handler, on_init(_), on_close)
-  case resp.status, resp.body {
-    200, mist.Websocket(x) ->
-      ok()
-      |> set_body(Websocket(x))
-    400, _ -> bad_request()
-    _, _ -> internal_server_error()
-  }
+  ws: WsSupported,
+  handler: fn(a, WebsocketConnection, WebsocketMessage(b)) -> actor.Next(b, a),
+  on_init: fn(WebsocketConnection) -> #(a, Option(process.Selector(b))),
+  on_close: fn(a) -> Nil,
+) -> WebsocketHandler(a, b) {
+  WebsocketHandler(
+    ws: ws,
+    socket: req.body.socket,
+    req: req,
+    handler: handler,
+    on_init: on_init,
+    on_close: on_close,
+  )
 }
