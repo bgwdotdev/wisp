@@ -9,6 +9,7 @@ import gleam/option.{type Option}
 import gleam/otp/actor
 import gleam/result
 import gleam/string
+import glisten/socket
 import mist
 import wisp
 import wisp/internal
@@ -126,7 +127,7 @@ fn mist_websocket(
     #(a, Option(process.Selector(b))),
   on_close on_close: fn(a) -> Nil,
 ) -> wisp.Response {
-  let assert Ws(x) = socket
+  let Ws(x) = socket
   let req = request.set_body(req, x)
   let resp = mist.websocket(req, handler, on_init(_), on_close)
   case resp.status, resp.body {
@@ -150,25 +151,14 @@ fn from_mist_websocket_message(
   }
 }
 
-pub opaque type WebsocketConnection {
-  WebsocketConnection(mist.WebsocketConnection)
-}
+// SENDERS
 
-/// Sends text to a websocket connection
-pub fn send_text(
-  connection: internal.WebsocketConnection(mist.WebsocketConnection),
-  text: String,
-) {
-  let conn = case connection {
-    internal.WebsocketConnection(conn) -> conn
+pub fn ws_send(
+  send: wisp.WebsocketSend(mist.WebsocketConnection),
+) -> Result(Nil, socket.SocketReason) {
+  let internal.WebsocketConnection(con) = send.conn
+  case send {
+    wisp.SendText(text, _) -> mist.send_text_frame(con, text)
+    wisp.SendBinary(binary, _) -> mist.send_binary_frame(con, binary)
   }
-  mist.send_text_frame(conn, text)
-}
-
-/// Sends binary data to a websocket connection
-pub fn send_binary(connection: WebsocketConnection, binary: BitArray) {
-  let conn = case connection {
-    WebsocketConnection(conn) -> conn
-  }
-  mist.send_binary_frame(conn, binary)
 }

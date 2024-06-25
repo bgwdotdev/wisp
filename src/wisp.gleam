@@ -1832,3 +1832,8 @@ pub fn ws_handler(
     on_close: on_close,
   )
 }
+
+pub type WebsocketSend(c) {
+  SendText(text: String, conn: WebsocketConnection(c))
+  SendBinary(binary: BitArray, conn: WebsocketConnection(c))
+}

@@ -1,5 +1,5 @@
-pub type WebsocketConnection(a) {
-  WebsocketConnection(a)
+pub type WebsocketConnection(c) {
+  WebsocketConnection(c)
 }
 
 pub type WsSupported {
