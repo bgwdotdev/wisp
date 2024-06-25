@@ -89,6 +89,7 @@ pub opaque type Ws {
   Ws(mist.Connection)
 }
 
+/// Creates a websocket from a wisp websocket handler spec
 pub fn websocket(
   ws: wisp.WebsocketHandler(a, b, mist.WebsocketConnection),
   socket: Ws,
@@ -151,9 +152,8 @@ fn from_mist_websocket_message(
   }
 }
 
-// SENDERS
-
-pub fn ws_send(
+/// Sends data to a websocket connection from a wisp websocket send spec
+pub fn send(
   send: wisp.WebsocketSend(mist.WebsocketConnection),
 ) -> Result(Nil, socket.SocketReason) {
   let internal.WebsocketConnection(con) = send.conn
