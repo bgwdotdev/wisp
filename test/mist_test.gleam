@@ -44,7 +44,7 @@ fn handle_req(req: wisp.Request, ctx: fn() -> Context) -> wisp.Response {
 }
 
 fn ws_handler(req: wisp.Request, ctx: Context) {
-  let on_init = fn(conn: wisp.WebsocketConnection) {
+  let on_init = fn(conn: wisp.WebsocketConnection(mist.WebsocketConnection)) {
     let assert Ok(_sent) = wisp_mist.send_text(conn, "Hello, Joe!")
     #("", None)
   }

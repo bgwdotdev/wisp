@@ -1798,20 +1798,20 @@ pub type WebsocketMessage(a) {
 }
 
 // sends to user
-// could this be a subject that we Selector in the adapter?
-type WebsocketConnection =
-  internal.WebsocketConnection
+type WebsocketConnection(c) =
+  internal.WebsocketConnection(c)
 
 pub type WsSupported =
   internal.WsSupported
 
 // TODO: heavily doc this
-pub type WebsocketHandler(a, b) {
+pub type WebsocketHandler(a, b, c) {
   WebsocketHandler(
     ws: WsSupported,
     req: Request,
-    handler: fn(a, WebsocketConnection, WebsocketMessage(b)) -> actor.Next(b, a),
-    on_init: fn(WebsocketConnection) -> #(a, Option(process.Selector(b))),
+    handler: fn(a, WebsocketConnection(c), WebsocketMessage(b)) ->
+      actor.Next(b, a),
+    on_init: fn(WebsocketConnection(c)) -> #(a, Option(process.Selector(b))),
     on_close: fn(a) -> Nil,
   )
 }
@@ -1819,10 +1819,11 @@ pub type WebsocketHandler(a, b) {
 pub fn ws_handler(
   req: Request,
   ws: WsSupported,
-  handler: fn(a, WebsocketConnection, WebsocketMessage(b)) -> actor.Next(b, a),
-  on_init: fn(WebsocketConnection) -> #(a, Option(process.Selector(b))),
+  handler: fn(a, WebsocketConnection(c), WebsocketMessage(b)) ->
+    actor.Next(b, a),
+  on_init: fn(WebsocketConnection(c)) -> #(a, Option(process.Selector(b))),
   on_close: fn(a) -> Nil,
-) -> WebsocketHandler(a, b) {
+) -> WebsocketHandler(a, b, c) {
   WebsocketHandler(
     ws: ws,
     req: req,

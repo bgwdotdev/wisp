@@ -9,10 +9,6 @@ links = [
   { title = "Sponsor", href = "https://github.com/sponsors/lpil" },
 ]
 
-internal_modules = [
-  "wisp/internal",
-]
-
 [dependencies]
 exception = ">= 2.0.0 and < 3.0.0"
 gleam_crypto = ">= 1.0.0 and < 2.0.0"

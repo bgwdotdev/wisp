@@ -88,14 +88,17 @@ pub opaque type Ws {
   Ws(mist.Connection)
 }
 
-pub fn websocket(ws: wisp.WebsocketHandler(a, b), socket: Ws) -> wisp.Response {
+pub fn websocket(
+  ws: wisp.WebsocketHandler(a, b, mist.WebsocketConnection),
+  socket: Ws,
+) -> wisp.Response {
   let handler = mist_ws_handler(ws)
   let on_init = mist_ws_on_init(ws)
   mist_websocket(ws.req, socket, handler, on_init, ws.on_close)
 }
 
 fn mist_ws_handler(
-  ws: wisp.WebsocketHandler(a, b),
+  ws: wisp.WebsocketHandler(a, b, mist.WebsocketConnection),
 ) -> fn(a, mist.WebsocketConnection, mist.WebsocketMessage(b)) ->
   actor.Next(b, a) {
   fn(state: a, conn: mist.WebsocketConnection, msg: mist.WebsocketMessage(b)) {
@@ -106,7 +109,7 @@ fn mist_ws_handler(
 }
 
 fn mist_ws_on_init(
-  ws: wisp.WebsocketHandler(a, b),
+  ws: wisp.WebsocketHandler(a, b, mist.WebsocketConnection),
 ) -> fn(mist.WebsocketConnection) -> #(a, Option(process.Selector(b))) {
   fn(conn: mist.WebsocketConnection) {
     let conn = internal.WebsocketConnection(conn)
@@ -152,7 +155,10 @@ pub opaque type WebsocketConnection {
 }
 
 /// Sends text to a websocket connection
-pub fn send_text(connection: wisp.WebsocketConnection, text: String) {
+pub fn send_text(
+  connection: internal.WebsocketConnection(mist.WebsocketConnection),
+  text: String,
+) {
   let conn = case connection {
     internal.WebsocketConnection(conn) -> conn
   }
