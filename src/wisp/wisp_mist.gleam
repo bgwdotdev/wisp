@@ -40,7 +40,7 @@ pub fn handler(
   fn(request: HttpRequest(_)) {
     let mist: mist.Connection = request.body
     let connection =
-      wisp.make_connection(mist_body_reader(request), secret_key_base)
+      internal.make_connection(mist_body_reader(request), secret_key_base)
     let request = request.set_body(request, connection)
 
     use <- exception.defer(fn() {
@@ -56,23 +56,23 @@ pub fn handler(
   }
 }
 
-fn mist_body_reader(request: HttpRequest(mist.Connection)) -> wisp.Reader {
+fn mist_body_reader(request: HttpRequest(mist.Connection)) -> internal.Reader {
   case mist.stream(request) {
-    Error(_) -> fn(_) { Ok(wisp.ReadingFinished) }
+    Error(_) -> fn(_) { Ok(internal.ReadingFinished) }
     Ok(stream) -> fn(size) { wrap_mist_chunk(stream(size)) }
   }
 }
 
 fn wrap_mist_chunk(
   chunk: Result(mist.Chunk, mist.ReadError),
-) -> Result(wisp.Read, Nil) {
+) -> Result(internal.Read, Nil) {
   chunk
   |> result.nil_error
   |> result.map(fn(chunk) {
     case chunk {
-      mist.Done -> wisp.ReadingFinished
+      mist.Done -> internal.ReadingFinished
       mist.Chunk(data, consume) ->
-        wisp.Chunk(data, fn(size) { wrap_mist_chunk(consume(size)) })
+        internal.Chunk(data, fn(size) { wrap_mist_chunk(consume(size)) })
     }
   })
 }

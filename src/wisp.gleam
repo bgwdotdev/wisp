@@ -544,36 +544,11 @@ pub fn internal_server_error() -> Response {
 /// The body of the request can be read from this connection using functions
 /// such as `require_multipart_body`.
 /// 
-pub opaque type Connection {
-  Connection(
-    reader: Reader,
-    max_body_size: Int,
-    max_files_size: Int,
-    read_chunk_size: Int,
-    secret_key_base: String,
-    temporary_directory: String,
-  )
-}
-
-pub fn make_connection(
-  body_reader: Reader,
-  secret_key_base: String,
-) -> Connection {
-  // TODO: replace `/tmp` with appropriate for the OS
-  let prefix = "/tmp/gleam-wisp/"
-  let temporary_directory = join_path(prefix, random_slug())
-  Connection(
-    reader: body_reader,
-    max_body_size: 8_000_000,
-    max_files_size: 32_000_000,
-    read_chunk_size: 1_000_000,
-    temporary_directory: temporary_directory,
-    secret_key_base: secret_key_base,
-  )
-}
+type Connection =
+  internal.Connection
 
 type BufferedReader {
-  BufferedReader(reader: Reader, buffer: BitArray)
+  BufferedReader(reader: internal.Reader, buffer: BitArray)
 }
 
 type Quotas {
@@ -595,19 +570,14 @@ fn decrement_quota(quota: Int, size: Int) -> Result(Int, Response) {
   }
 }
 
-fn buffered_read(reader: BufferedReader, chunk_size: Int) -> Result(Read, Nil) {
+fn buffered_read(
+  reader: BufferedReader,
+  chunk_size: Int,
+) -> Result(internal.Read, Nil) {
   case reader.buffer {
     <<>> -> reader.reader(chunk_size)
-    _ -> Ok(Chunk(reader.buffer, reader.reader))
+    _ -> Ok(internal.Chunk(reader.buffer, reader.reader))
   }
-}
-
-type Reader =
-  fn(Int) -> Result(Read, Nil)
-
-pub type Read {
-  Chunk(BitArray, next: Reader)
-  ReadingFinished
 }
 
 /// Set the maximum permitted size of a request body of the request in bytes.
@@ -621,7 +591,7 @@ pub type Read {
 /// instead use the `max_files_size` limit.
 ///
 pub fn set_max_body_size(request: Request, size: Int) -> Request {
-  Connection(..request.body, max_body_size: size)
+  internal.Connection(..request.body, max_body_size: size)
   |> request.set_body(request, _)
 }
 
@@ -645,7 +615,7 @@ pub fn set_secret_key_base(request: Request, key: String) -> Request {
   case string.byte_size(key) < 64 {
     True -> panic as "Secret key base must be at least 64 bytes long"
     False ->
-      Connection(..request.body, secret_key_base: key)
+      internal.Connection(..request.body, secret_key_base: key)
       |> request.set_body(request, _)
   }
 }
@@ -667,7 +637,7 @@ pub fn get_secret_key_base(request: Request) -> String {
 /// `max_files_size` limit.
 ///
 pub fn set_max_files_size(request: Request, size: Int) -> Request {
-  Connection(..request.body, max_files_size: size)
+  internal.Connection(..request.body, max_files_size: size)
   |> request.set_body(request, _)
 }
 
@@ -687,7 +657,7 @@ pub fn get_max_files_size(request: Request) -> Int {
 /// been received from the client.
 ///
 pub fn set_read_chunk_size(request: Request, size: Int) -> Request {
-  Connection(..request.body, read_chunk_size: size)
+  internal.Connection(..request.body, read_chunk_size: size)
   |> request.set_body(request, _)
 }
 
@@ -899,15 +869,15 @@ pub fn read_body_to_bitstring(request: Request) -> Result(BitArray, Nil) {
 }
 
 fn read_body_loop(
-  reader: Reader,
+  reader: internal.Reader,
   read_chunk_size: Int,
   max_body_size: Int,
   accumulator: BitArray,
 ) -> Result(BitArray, Nil) {
   use chunk <- result.try(reader(read_chunk_size))
   case chunk {
-    ReadingFinished -> Ok(accumulator)
-    Chunk(chunk, next) -> {
+    internal.ReadingFinished -> Ok(accumulator)
+    internal.Chunk(chunk, next) -> {
       let accumulator = bit_array.append(accumulator, chunk)
       case bit_array.byte_size(accumulator) > max_body_size {
         True -> Error(Nil)
@@ -1205,13 +1175,13 @@ fn multipart_content_disposition(
 fn read_chunk(
   reader: BufferedReader,
   chunk_size: Int,
-) -> Result(#(BitArray, Reader), Response) {
+) -> Result(#(BitArray, internal.Reader), Response) {
   buffered_read(reader, chunk_size)
   |> result.replace_error(bad_request())
   |> result.try(fn(chunk) {
     case chunk {
-      Chunk(chunk, next) -> Ok(#(chunk, next))
-      ReadingFinished -> Error(bad_request())
+      internal.Chunk(chunk, next) -> Ok(#(chunk, next))
+      internal.ReadingFinished -> Error(bad_request())
     }
   })
 }
@@ -1355,22 +1325,6 @@ pub fn log_request(req: Request, handler: fn() -> Response) -> Response {
   response
 }
 
-fn remove_preceeding_slashes(string: String) -> String {
-  case string {
-    "/" <> rest -> remove_preceeding_slashes(rest)
-    _ -> string
-  }
-}
-
-// TODO: replace with simplifile function when it exists
-fn join_path(a: String, b: String) -> String {
-  let b = remove_preceeding_slashes(b)
-  case string.ends_with(a, "/") {
-    True -> a <> b
-    False -> a <> "/" <> b
-  }
-}
-
 /// A middleware function that serves files from a directory, along with a
 /// suitable `content-type` header for known file extensions.
 ///
@@ -1418,15 +1372,15 @@ pub fn serve_static(
   from directory: String,
   next handler: fn() -> Response,
 ) -> Response {
-  let path = remove_preceeding_slashes(req.path)
-  let prefix = remove_preceeding_slashes(prefix)
+  let path = internal.remove_preceeding_slashes(req.path)
+  let prefix = internal.remove_preceeding_slashes(prefix)
   case req.method, string.starts_with(path, prefix) {
     http.Get, True -> {
       let path =
         path
         |> string.drop_left(string.length(prefix))
         |> string.replace(each: "..", with: "")
-        |> join_path(directory, _)
+        |> internal.join_path(directory, _)
 
       let mime_type =
         req.path
@@ -1495,7 +1449,7 @@ pub fn new_temporary_file(
 ) -> Result(String, simplifile.FileError) {
   let directory = request.body.temporary_directory
   use _ <- result.try(simplifile.create_directory_all(directory))
-  let path = join_path(directory, random_slug())
+  let path = internal.join_path(directory, internal.random_slug())
   use _ <- result.map(simplifile.create_file(path))
   path
 }
@@ -1632,9 +1586,7 @@ pub fn log_debug(message: String) -> Nil {
 /// Generate a random string of the given length.
 ///
 pub fn random_string(length: Int) -> String {
-  crypto.strong_random_bytes(length)
-  |> bit_array.base64_url_encode(False)
-  |> string.slice(0, length)
+  internal.random_string(length)
 }
 
 /// Sign a message which can later be verified using the `verify_signed_message`
@@ -1667,10 +1619,6 @@ pub fn verify_signed_message(
   message: String,
 ) -> Result(BitArray, Nil) {
   crypto.verify_signed_message(message, <<request.body.secret_key_base:utf8>>)
-}
-
-fn random_slug() -> String {
-  random_string(16)
 }
 
 //
@@ -1779,8 +1727,10 @@ pub fn create_canned_connection(
   body: BitArray,
   secret_key_base: String,
 ) -> Connection {
-  make_connection(
-    fn(_size) { Ok(Chunk(body, fn(_size) { Ok(ReadingFinished) })) },
+  internal.make_connection(
+    fn(_size) {
+      Ok(internal.Chunk(body, fn(_size) { Ok(internal.ReadingFinished) }))
+    },
     secret_key_base,
   )
 }
