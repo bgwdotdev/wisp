@@ -29,32 +29,6 @@ import simplifile
 import wisp/internal
 
 //
-// Running the server
-//
-
-/// Convert a Wisp request handler into a function that can be run with the Mist
-/// web server.
-///
-/// # Examples
-///
-/// ```gleam
-/// pub fn main() {
-///   let secret_key_base = "..."
-///   let assert Ok(_) =
-///     handle_request
-///     |> wisp.mist_handler(secret_key_base)
-///     |> mist.new
-///     |> mist.port(8000)
-///     |> mist.start_http
-///   process.sleep_forever()
-/// }
-/// ```
-@deprecated("use wisp_mist.handler instead")
-pub fn mist_handler() {
-  todo as "document move"
-}
-
-//
 // Responses
 //
 
@@ -1742,24 +1716,44 @@ pub fn create_canned_connection(
 /// The messages possible to receive to and from a websocket handler.
 ///
 pub type WebsocketMessage(a) {
+  /// A string message received from a websocket.
+  ///
   WsText(String)
+  /// A binary data message received from a websocket.
+  ///
   WsBinary(BitArray)
+  /// A websocket closed message received from a websocket client disconnection.
+  ///
   WsClosed
+  /// A Shutdown request used to cleanly close a websocket connection on the
+  /// server-side.
+  ///
   WsShutdown
+  /// A custom message type sent to the websocket handlers subject/selector
+  /// (created during `on_init`) from within the application by another
+  /// actor/process.
+  ///
   WsCustom(a)
 }
 
 /// An active websocket connection used to send messages to the client
 ///
+/// This connection is used from within a websocket handler function to
+/// send data to the client via `SendText` or `SendBinary`
+///
 type WebsocketConnection(c) =
   internal.WebsocketConnection(c)
 
-/// For web socket capable servers to connect to clients
+/// A socket connection used to connect to clients.
+///
+/// This is provided by a websocket capable server's handler
+/// function. It is required to turn a http connection into an
+/// active websocket (`WebsocketConnection`).
 ///
 pub type Ws(d) =
   internal.Ws(d)
 
-/// Configuration for a websockets creation and lifecycle.
+/// Configuration for a websockets creation and life-cycle.
 ///
 /// Through the `on_init` function, a connection to the web socket client is initially
 /// made available and the default actor state for the websocket can be set.
@@ -1798,8 +1792,9 @@ pub type Ws(d) =
 ///
 /// # Example with selector
 ///
-/// Optionally, `on_init` can be provided a `selector`  to send mesasges to
-/// the handler function as `WsCustom` messsages from inside the application
+/// Optionally, `on_init` can be provided a `selector` which is used to send
+/// messages to the handler function as `WsCustom` messages from inside the
+/// application
 ///
 /// ```gleam
 /// type State {
